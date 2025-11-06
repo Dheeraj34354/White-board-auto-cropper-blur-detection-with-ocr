@@ -1,17 +1,8 @@
-import re
 import io
 import cv2
 import numpy as np
 from PIL import Image
 import streamlit as st
-import easyocr
-
-# Cache EasyOCR reader
-@st.cache_resource
-def load_model():
-    return easyocr.Reader(['en'], gpu=False)
-
-reader = load_model()
 
 def preprocess_image(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -79,12 +70,7 @@ def resize_for_display(image, max_width=1000):
         return cv2.resize(image, (max_width, int(h * ratio)), interpolation=cv2.INTER_LANCZOS4)
     return image
 
-def clean_ocr_text(s: str) -> str:
-    s = re.sub(r'[^A-Za-z0-9\-\.,:\(\)\s]', '', s)
-    s = re.sub(r'\s{2,}', ' ', s).strip()
-    return s
-
-st.title("Whiteboard Cropper, Enhancer & OCR")
+st.title("Whiteboard Cropper and Enhancer")
 uploaded_file = st.file_uploader("Upload a whiteboard photo", type=["jpg", "jpeg", "png"], key="uploader")
 
 if uploaded_file:
@@ -121,44 +107,6 @@ if uploaded_file:
 
         st.header("3. Final Enhanced Image")
         st.image(cv2.cvtColor(resize_for_display(result), cv2.COLOR_BGR2RGB), channels="RGB")
-
-        # Improved OCR preprocessing + EasyOCR call
-        st.header("Extracted Text from Image")
-        with st.spinner("Extracting text (improved)..."):
-            scale = 3
-            gray_up = cv2.resize(cleaned_gray, (cleaned_gray.shape[1]*scale, cleaned_gray.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
-            gray_up = cv2.bilateralFilter(gray_up, d=9, sigmaColor=75, sigmaSpace=75)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-            gray_up = clahe.apply(gray_up)
-            th = cv2.adaptiveThreshold(gray_up, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 9)
-            if np.mean(th) < 127:
-                th = 255 - th
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
-            th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
-            th = cv2.erode(th, kernel, iterations=1)
-            ocr_img = cv2.cvtColor(th, cv2.COLOR_GRAY2RGB)
-
-            try:
-                results = reader.readtext(ocr_img, detail=1, paragraph=False)
-                filtered = [r for r in results if r[2] >= 0.30]
-                filtered.sort(key=lambda x: min(pt[1] for pt in x[0]))
-                lines = []
-                prev_y = None
-                y_tol = 30 * scale
-                for bbox, text, conf in filtered:
-                    top_y = min(pt[1] for pt in bbox)
-                    if prev_y is None or abs(top_y - prev_y) > y_tol:
-                        lines.append(text)
-                    else:
-                        lines[-1] += " " + text
-                    prev_y = top_y
-                cleaned_lines = [clean_ocr_text(l) for l in lines]
-                extracted_text = "\n".join(cleaned_lines) if cleaned_lines else "[No text detected]"
-            except Exception as e:
-                st.error(f"OCR extraction failed: {e}")
-                extracted_text = "[No text detected]"
-
-        st.text_area("Copy the text below", value=extracted_text, height=240)
 
         # Download enhanced image
         img_pil = Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))

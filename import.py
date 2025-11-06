@@ -125,53 +125,38 @@ if uploaded_file:
         # Improved OCR preprocessing + EasyOCR call
         st.header("Extracted Text from Image")
         with st.spinner("Extracting text (improved)..."):
-            # upscale and denoise
             scale = 3
-            gray_up = cv2.resize(cleaned_gray, (cleaned_gray.shape[1]*scale, cleaned_gray.shape[0]*scale),
-                                 interpolation=cv2.INTER_CUBIC)
+            gray_up = cv2.resize(cleaned_gray, (cleaned_gray.shape[1]*scale, cleaned_gray.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
             gray_up = cv2.bilateralFilter(gray_up, d=9, sigmaColor=75, sigmaSpace=75)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             gray_up = clahe.apply(gray_up)
-
-            # adaptive threshold (handwriting-friendly)
-            th = cv2.adaptiveThreshold(gray_up, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       cv2.THRESH_BINARY, 31, 9)
+            th = cv2.adaptiveThreshold(gray_up, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 9)
             if np.mean(th) < 127:
                 th = 255 - th
-
-            # morphological close then slight erosion to join strokes and thin thick lines
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
             th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
             th = cv2.erode(th, kernel, iterations=1)
-
             ocr_img = cv2.cvtColor(th, cv2.COLOR_GRAY2RGB)
 
             try:
-                raw = reader.readtext(ocr_img, detail=1, paragraph=False,
-                                      contrast_ths=0.05, adjust_contrast=0.7,
-                                      text_threshold=0.35, low_text=0.3, link_threshold=0.4,
-                                      mag_ratio=1)
-            except Exception:
-                raw = []
-
-            # filter low-confidence, sort top-to-bottom
-            filtered = [r for r in raw if r[2] >= 0.30]
-            filtered.sort(key=lambda x: min(pt[1] for pt in x[0]))
-
-            # group words into lines by vertical proximity
-            lines = []
-            prev_y = None
-            y_tol = 30 * scale
-            for bbox, text, conf in filtered:
-                top_y = min(pt[1] for pt in bbox)
-                if prev_y is None or abs(top_y - prev_y) > y_tol:
-                    lines.append(text)
-                else:
-                    lines[-1] += " " + text
-                prev_y = top_y
-
-            cleaned_lines = [clean_ocr_text(l) for l in lines]
-            extracted_text = "\n".join(cleaned_lines) if cleaned_lines else "[No text detected]"
+                results = reader.readtext(ocr_img, detail=1, paragraph=False)
+                filtered = [r for r in results if r[2] >= 0.30]
+                filtered.sort(key=lambda x: min(pt[1] for pt in x[0]))
+                lines = []
+                prev_y = None
+                y_tol = 30 * scale
+                for bbox, text, conf in filtered:
+                    top_y = min(pt[1] for pt in bbox)
+                    if prev_y is None or abs(top_y - prev_y) > y_tol:
+                        lines.append(text)
+                    else:
+                        lines[-1] += " " + text
+                    prev_y = top_y
+                cleaned_lines = [clean_ocr_text(l) for l in lines]
+                extracted_text = "\n".join(cleaned_lines) if cleaned_lines else "[No text detected]"
+            except Exception as e:
+                st.error(f"OCR extraction failed: {e}")
+                extracted_text = "[No text detected]"
 
         st.text_area("Copy the text below", value=extracted_text, height=240)
 
@@ -181,5 +166,6 @@ if uploaded_file:
         img_pil.save(buf, format="PNG")
         buf.seek(0)
         st.download_button("Download Enhanced PNG", buf, "enhanced_whiteboard_final.png", mime="image/png")
+
 else:
     st.markdown("Upload a whiteboard image to get started!")
